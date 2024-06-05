@@ -1,0 +1,66 @@
+################################################
+# Deform square chiral lattice by applying Bext
+################################################
+# Gabriel Alkuino
+# 2024-06-04
+
+################################################
+units		cgs
+dimension       2
+boundary 	s s p
+processors	* * 1
+
+atom_style      hybrid dipole molecular sphere
+bond_style	harmonic
+
+read_data	square-chiral.lam
+
+# Groups
+group ela type 1 2
+group rgd type 3 4 5
+group dipole type 5
+
+# Add dipole-dipole interaction (negligible)
+variable	dcut index 4.0
+pair_style	lj/cut/dipole/cut 0.0 0.0
+pair_coeff	* * 0.0 0.0
+pair_coeff	5 5 0.0 0.0 0.0 ${dcut}
+
+# Build different neighbor list for dipole and others
+neighbor 	0.1 multi
+neigh_modify	collection/type 2 1,2,3,4 5
+
+comm_style 	tiled
+comm_modify	mode multi cutoff/multi 1 0.1 cutoff/multi 2 ${dcut}
+
+timestep 	1e-6
+
+variable B equal 80e-3/1e-4 # 80 mT converted to CGS units
+variable theta equal 100 # determined by trial and error
+
+variable Bx equal v_B*cos(v_theta/180*PI)
+variable By equal v_B*sin(v_theta/180*PI)
+
+variable bx equal v_Bx*ramp(0,1)
+variable by equal v_By*ramp(0,1)
+
+fix enve ela nve
+fix rnve rgd rigid/nve molecule
+fix visc all viscous 0.01
+fix bext all efield v_bx v_by 0
+fix bal all balance 10000 1.1 rcb
+fix 2d all enforce2d
+
+thermo 10000
+thermo_style custom step temp
+
+dump 1 all custom 10000 dump.xyz x y z id mol type diameter mux muy muz
+
+run 500000 # 0.5s
+
+# Constant field
+fix bext all efield 0 v_By 0
+
+fix visc all viscous 0.1
+
+run 3000000 # 3s
