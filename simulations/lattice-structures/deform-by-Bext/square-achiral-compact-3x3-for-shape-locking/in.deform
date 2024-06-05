@@ -1,0 +1,105 @@
+################################################
+# Deform the lattice under different Bext
+################################################
+# Gabriel Alkuino
+# 2024-06-05
+
+variable fname string square-achiral-compact-3x3
+variable BmT index 0 20 40 60 80 100 # always start at 0
+
+################################################
+units		cgs
+dimension       2
+boundary 	f f p
+processors	* * 1
+
+atom_style      hybrid dipole molecular sphere
+bond_style	harmonic
+
+special_bonds lj 0.0 1.0 1.0
+
+read_data	${fname}.lam
+
+# Groups
+group ela type 1 2
+group rgd type 3 4 5
+group dipole type 5
+
+pair_style      none
+
+neighbor 	0.1 bin
+comm_style	brick
+comm_modify	mode single cutoff 0.1
+
+timestep 	1e-6
+
+################################################
+# Thermo output
+
+# measure the distance between magnets to avoid edge effects
+compute xmax dipole reduce max x
+compute xmin dipole reduce min x
+compute ymax dipole reduce max y
+compute ymin dipole reduce min y
+
+run 0
+
+variable Lx equal "c_xmax-c_xmin"
+variable Ly equal "c_ymax-c_ymin"
+
+variable Lx0 equal ${Lx}
+variable Ly0 equal ${Ly}
+
+variable xstrain equal "v_Lx/v_Lx0-1"
+variable ystrain equal "v_Ly/v_Ly0-1"
+
+thermo 5000
+thermo_style custom step temp v_xstrain v_ystrain
+
+################################################
+# Fixes
+
+fix enve ela nve
+fix rnve rgd rigid/nve molecule
+fix visc all viscous 0.01
+fix bext dipole efield 0 0 0
+fix 2d all enforce2d
+
+# Dump coordinates for shape-locked lattice 
+dump final all xyz 1 ${fname}-B${BmT}mT-relaxed.xyz
+dump_modify final sort id
+run 0
+undump final
+
+variable BimT equal ${BmT}
+next BmT
+################################################
+# Loop over BmT, applied in +y direction
+
+label loopstart
+
+# Visualization
+dump deform all custom 10000 ${fname}-B${BimT}-${BmT}mT.xyz x y z id mol type diameter mux muy muz
+
+# Slowly increase B-field
+variable by equal ((${BmT}-${BimT})*ramp(0,1)+${BimT})*10
+
+fix bext dipole efield 0 v_by 0
+run 500000
+
+# Constant B-field
+variable By equal ${BmT}*10
+fix bext dipole efield 0 v_By 0
+
+run 500000 
+
+undump deform
+
+dump final all xyz 1 ${fname}-B${BmT}mT-relaxed.xyz
+dump_modify final sort id
+run 0
+undump final
+
+variable BimT equal ${BmT}
+next BmT
+jump SELF loopstart
