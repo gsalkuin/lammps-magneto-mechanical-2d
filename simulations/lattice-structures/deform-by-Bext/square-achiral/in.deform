@@ -59,7 +59,7 @@ dump 1 all custom 10000 dump.xyz x y z id mol type diameter mux muy muz
 run 500000 # 0.5s
 
 # Constant field
-fix bext all efield 0 v_By 0
+fix bext all efield v_Bx v_By 0
 
 fix visc all viscous 0.1
 
