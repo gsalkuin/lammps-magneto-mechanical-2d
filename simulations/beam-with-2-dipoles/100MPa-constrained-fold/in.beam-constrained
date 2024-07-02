@@ -1,0 +1,184 @@
+################################################
+# Energy landscape of constrained beam
+################################################
+# Gabriel Alkuino
+# 2024-03-13
+
+variable fname string beam-w2dip-100.0MPa
+# no contact model to fully fold the beam without gap
+
+################################################
+units		cgs
+dimension       2
+boundary 	s s p
+processors	* * 1
+
+atom_style      hybrid dipole molecular sphere
+bond_style	harmonic
+
+special_bonds lj 0.0 0.0 1.0
+
+read_data	${fname}.lam
+
+# Groups
+group ela type 1 2
+group rgd type 3 4 5
+group dipole type 5
+
+#################################################
+# Set dipole manually
+
+region left block INF 0 INF INF INF INF
+region right block 0 INF INF INF INF INF
+
+group left region left
+group right region right
+
+group magleft intersect rgd left
+group magright intersect rgd right
+
+group dipl intersect dipole left
+group dipr intersect dipole right
+
+variable mdip equal 784.855 # dipole moment of d = h = 1cm NdFeB
+variable thetal equal "0"  
+variable thetar equal "0"
+
+set group dipl dipole $(v_mdip*cos(v_thetal)) $(v_mdip*sin(v_thetal)) 0
+set group dipr dipole $(v_mdip*cos(v_thetar)) $(v_mdip*sin(v_thetar)) 0
+
+################################################
+# PAIR, NEIGH, COMM
+
+variable dcut equal 12.0
+variable bcut equal 0.1 
+
+pair_style      hybrid lj/cut/dipole/cut 0.0 ${dcut} soft 0.0 
+pair_coeff	* * none
+pair_coeff	4 4 soft 0.0 
+pair_coeff	5 5 lj/cut/dipole/cut 0.0 0.0 0.0 12.0
+
+# Build separate neighbor list for dipole
+neighbor 	0.1 multi
+neigh_modify	collection/type 3 1,2,4 3 5 exclude molecule/intra rgd
+
+comm_style 	brick
+
+comm_modify	mode multi cutoff/multi 1 ${bcut} cutoff/multi 2 0.0 cutoff/multi 3 ${dcut} vel yes
+
+################################################
+# FIXES (specific to this .lam file)
+
+timestep 1e-7 
+
+variable rigidID atomfile ${fname}-rigid-ID.txt
+
+fix nve ela nve
+fix rgd rgd rigid/nve custom v_rigidID
+fix lan all langevin 0 0 1e-3 68439 zero yes
+fix bal all balance 1000 1.1 shift x 10 1.1
+fix 2d all enforce2d
+
+# Indenter
+variable cylR equal 0.7
+variable yind equal v_cylR*(-1+4.5*ramp(0,1))
+fix indc all indent 1e8 cylinder z 0.0 v_yind ${cylR} units box
+
+fix wall rgd wall/harmonic yhi 1 1e8 0 0.2 units box
+
+compute max_y all reduce max y
+compute min_y all reduce min y
+
+compute dipxmax dipr reduce max x
+compute dipxmin dipl reduce min x
+variable dx equal "c_dipxmax-c_dipxmin"
+
+compute rf magright reduce sum fx fy fz
+
+compute Umag all pair lj/cut/dipole/cut epair
+compute Uela all pe bond
+
+thermo 1000
+thermo_style custom step temp v_dx c_Uela c_Umag c_rf[1] c_rf[2] c_rf[3]
+
+dump d1 all custom 100000 dump.xyz x y z id mol type diameter mux muy muz
+
+run 1000000 
+
+unfix indc
+unfix wall
+unfix nve
+unfix rgd
+unfix lan
+unfix bal
+unfix 2d
+
+### Relax
+
+fix nve ela nve
+fix ml magleft move linear 0 0 0
+fix mr magright move linear 0 0 0
+fix lan all langevin 0 0 1e-4 68439 zero yes
+fix bal all balance 1000 1.1 shift x 10 1.1
+fix 2d all enforce2d
+
+run 100000
+
+unfix nve
+unfix ml
+unfix mr
+unfix lan
+unfix bal
+unfix 2d
+
+### Move magnets apart
+
+fix nve ela nve
+fix ml magleft move linear -6 0 0 units box
+fix mr magright move linear 6 0 0 units box
+fix lan all langevin 0 0 1e-4 68439 zero yes
+fix bal all balance 1000 1.1 shift x 10 1.1
+fix 2d all enforce2d
+
+fix prntU all print 1000 "${dx} $(c_Uela) $(c_Umag)" file ${fname}-energy.txt screen no
+fix prntF all print 1000 "${dx} c_rf[1] c_rf[2]" file ${fname}-force.txt screen no
+
+run 200000 
+
+unfix nve
+unfix ml
+unfix mr
+unfix lan
+unfix bal
+unfix 2d
+
+### Move magnets together
+
+fix nve ela nve
+fix ml magleft move linear 7.5 0 0 units box
+fix mr magright move linear -7.5 0 0 units box
+fix lan all langevin 0 0 1e-4 68439 zero yes
+fix bal all balance 1000 1.1 shift x 10 1.1
+fix 2d all enforce2d
+
+run 1000000 
+
+### Relax
+
+fix nve ela nve
+fix ml magleft move linear 0 0 0
+fix mr magright move linear 0 0 0
+fix lan all langevin 0 0 1e-4 68439 zero yes
+fix bal all balance 1000 1.1 shift x 10 1.1
+fix 2d all enforce2d
+
+run 100000
+
+undump d1
+
+# Output coordinates of folded state to use in other simulations
+dump d2 all xyz 1 ${fname}-folded.xyz
+dump_modify d2 sort id
+
+run 0
+

@@ -1,0 +1,101 @@
+################################################
+# Beam will collapse on its own due to magnetic force
+################################################
+# Gabriel Alkuino
+# 2024-03-01
+
+variable fname string beam-w2dip-gran-1.0MPa
+# apply granular contact model
+
+################################################
+units		cgs
+dimension       2
+boundary 	s s p
+processors	* * 1
+
+atom_style      hybrid dipole molecular sphere
+bond_style	harmonic
+
+special_bonds lj 0.0 0.0 1.0
+
+read_data	${fname}.lam
+
+# Groups
+group ela type 1 2
+group rgd type 3 4 5
+group dipole type 5
+
+#################################################
+# Set dipole manually
+
+region left block INF 0 INF INF INF INF
+region right block 0 INF INF INF INF INF
+
+group left region left
+group right region right
+
+group magleft intersect rgd left
+
+group dipl intersect dipole left
+group dipr intersect dipole right
+
+variable mdip equal 784.855 # dipole moment of d = h = 1cm NdFeB
+variable thetal equal "0"  
+variable thetar equal "0"
+
+set group dipl dipole $(v_mdip*cos(v_thetal)) $(v_mdip*sin(v_thetal)) 0
+set group dipr dipole $(v_mdip*cos(v_thetar)) $(v_mdip*sin(v_thetar)) 0
+
+################################################
+# PAIR, NEIGH, COMM
+
+variable dcut equal 12.0
+
+# granular contact parameters
+variable ecut equal 0.1
+variable kn equal 1e8
+variable ve equal 0.1
+variable kt equal 1e8
+variable mdamp equal 1.0
+variable slide_fric equal 0.1
+
+pair_style      hybrid lj/cut/dipole/cut 0.0 ${dcut} granular ${ecut} 
+pair_coeff	* * none
+pair_coeff	4 4 granular hooke ${kn} ${ve} tangential mindlin ${kt} ${mdamp} ${slide_fric} damping velocity
+pair_coeff	5 5 lj/cut/dipole/cut 0.0 0.0 0.0 12.0
+
+# Build different neighbor list for dipole and soft
+neighbor 	0.1 multi
+neigh_modify	collection/type 3 1,2,4 3 5 exclude molecule/intra rgd
+
+comm_style 	brick
+
+comm_modify	mode multi cutoff/multi 1 ${ecut} cutoff/multi 2 0.0 cutoff/multi 3 ${dcut} vel yes
+
+################################################
+# FIXES
+
+timestep 1e-6 
+
+variable rigidID atomfile ${fname}-rigid-ID.txt
+
+fix nve ela nve
+fix rgd rgd rigid/nve custom v_rigidID
+fix lan all langevin 0 0 1e-2 68439 zero yes
+fix bal all balance 1000 1.1 shift x 10 1.1
+fix 2d all enforce2d
+
+compute max_y all reduce max y
+compute min_y all reduce min y
+
+compute Umag all pair lj/cut/dipole/cut epair
+compute Uela all pe bond
+
+thermo 1000
+thermo_style custom step temp c_Uela c_Umag
+
+dump d1 all custom 100000 dump.xyz x y z id mol type diameter mux muy muz
+
+run 5000000 
+
+label end
