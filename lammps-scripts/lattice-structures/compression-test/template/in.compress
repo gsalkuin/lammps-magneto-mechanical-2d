@@ -1,0 +1,103 @@
+################################################
+# Compress the curved lattice stucture
+################################################
+# Gabriel Alkuino
+# 2024-06-05
+
+variable fname string square-achiral-compact-3x3
+variable BmT string BMT
+
+################################################
+units		cgs
+dimension       2
+boundary 	f f p
+processors	* * 1
+
+atom_style      hybrid dipole molecular sphere
+bond_style	harmonic
+
+read_data	${fname}-B${BmT}mT-curved.lam
+
+# Groups
+group ela type 1 2
+group rgd type 3 4
+
+group lat union ela rgd
+
+pair_style      soft 0.0
+pair_coeff	* * 0.0 0.0
+pair_coeff	1 2 1e6 0.05
+
+neighbor 	0.2 bin
+
+comm_style 	brick
+comm_modify	mode single cutoff 0.2
+
+###########################################################################
+# Compression
+
+# Note: structure is very stiff; mass is scaled to have reasonable simulation time
+timestep 	1e-7
+
+fix enve ela nve
+fix rnve rgd rigid/nve molecule
+fix visc all viscous 0.01
+fix 2d all enforce2d
+
+lattice sq 0.05 # change z box if needed so only 1 layer is produced
+
+region top block -2.4 2.4 2.35 2.39 INF INF units box
+region bot block -2.4 2.4 -2.39 -2.35 INF INF units box
+
+create_atoms 2 region top units box
+create_atoms 2 region bot units box
+
+group top region top
+group bot region bot
+
+group 2 type 2
+
+group twall intersect top 2 
+group bwall intersect bot 2
+
+set type 2 diameter 0.1 # make them overlap to approx smooth wall
+
+# Compress top wall by 0.1 mm/s
+fix ftw twall move linear 0.0 -0.01 0.0 units box
+
+# Fix bottom wall
+fix fbw bwall setforce 0 0 0
+
+################################################
+# Thermo output
+
+compute xmax lat reduce max x
+compute xmin lat reduce min x
+
+compute ymax lat reduce max y
+compute ymin lat reduce min y
+
+run 0
+
+variable Lx0 equal $(c_xmax-c_xmin)
+
+variable Ly equal "c_ymax-c_ymin"
+variable Ly0 equal ${Ly}
+
+variable ystrain equal "v_Ly/v_Ly0-1"
+
+# Initial 'area' (thickness = 0.15 cm)
+variable Ax0 equal "0.15*v_Lx0"
+variable pyy equal "f_fbw[2]/v_Ax0"
+
+thermo 100000
+thermo_style custom step temp v_ystrain v_pyy
+
+fix ss all print 100000 "${pyy} ${ystrain}" file ${fname}-B${BmT}mT-stress-strain.txt screen no
+
+# dump every 0.5 s
+dump 1 all custom 5000000 ${fname}-B${BmT}mT-compress.xyz x y z id mol type diameter
+
+# Let simulation run until it finishes or crashes.
+run 800000000 # 0.8 cm = 80s
+

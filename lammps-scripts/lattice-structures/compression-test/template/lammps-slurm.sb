@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+## Example only. Modify to run in your own HPC system
+
+#SBATCH --job-name=ss-BBMTmT
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=16
+#SBATCH --cpus-per-task=1
+#SBATCH --time=48:00:00
+#SBATCH --output=%x.%N.%j.out
+
+## module reset
+## module load ...
+
+mpirun -np $SLURM_NTASKS /PATH/TO/YOUR/lmp_mpi -in in.compress
